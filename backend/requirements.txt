@@ -1,0 +1,7 @@
+# SMART Wi-Fi AutoPay - runtime dependencies
+# Versions are pinned for reproducible installs.
+# Development/test tools go in requirements-dev.txt.
+
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic-settings==2.7.0
