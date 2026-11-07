@@ -12,13 +12,12 @@ Calculation policy (PROPORTIONAL):
     rounding_step_minutes, and accepted only if it is between
     min_duration_minutes and max_duration_minutes.
 
-Every purchase must keep a snapshot of the rule that was applied; the
-payments/entitlements tables will store that copy, so editing a rule
-later never changes past purchases. Rules are deactivated, not deleted.
+Every purchase must keep a snapshot of the rule that was applied;
+editing a rule later never changes past purchases. Rules are
+deactivated, not deleted.
 """
 
 import uuid
-from decimal import Decimal
 
 from sqlalchemy import (
     CheckConstraint,
@@ -33,6 +32,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import MONEY, Base, TimestampMixin, UUIDPrimaryKeyMixin
 
+
 PRICING_RULE_STATUSES = ("ACTIVE", "INACTIVE")
 DURATION_POLICIES = ("PROPORTIONAL",)
 ROUNDING_POLICIES = ("DOWN", "NEAREST", "UP")
@@ -40,34 +40,59 @@ ROUNDING_POLICIES = ("DOWN", "NEAREST", "UP")
 
 class PricingRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "pricing_rules"
+
     __table_args__ = (
-        CheckConstraint("status IN ('ACTIVE', 'INACTIVE')", name="status_valid"),
         CheckConstraint(
-            "duration_policy IN ('PROPORTIONAL')", name="duration_policy_valid"
+            "status IN ('ACTIVE', 'INACTIVE')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "duration_policy IN ('PROPORTIONAL')",
+            name="duration_policy_valid",
         ),
         CheckConstraint(
             "rounding_policy IN ('DOWN', 'NEAREST', 'UP')",
             name="rounding_policy_valid",
         ),
-        CheckConstraint("min_amount > 0", name="min_amount_positive"),
-        CheckConstraint("max_amount >= min_amount", name="max_amount_not_below_min"),
-        CheckConstraint("price_per_hour > 0", name="price_per_hour_positive"),
-        CheckConstraint("rounding_step_minutes >= 1", name="rounding_step_positive"),
-        CheckConstraint("min_duration_minutes > 0", name="min_duration_positive"),
+        CheckConstraint(
+            "min_amount > 0",
+            name="min_amount_positive",
+        ),
+        CheckConstraint(
+            "max_amount >= min_amount",
+            name="max_amount_not_below_min",
+        ),
+        CheckConstraint(
+            "price_per_hour > 0",
+            name="price_per_hour_positive",
+        ),
+        CheckConstraint(
+            "rounding_step_minutes >= 1",
+            name="rounding_step_positive",
+        ),
+        CheckConstraint(
+            "min_duration_minutes > 0",
+            name="min_duration_positive",
+        ),
         CheckConstraint(
             "max_duration_minutes >= min_duration_minutes",
             name="max_duration_not_below_min",
         ),
-        CheckConstraint("device_limit >= 1", name="device_limit_at_least_one"),
-        # At most ONE active rule per site, so the backend never has to
-        # guess which rule applies. Any number of inactive rules is fine.
+        CheckConstraint(
+            "device_limit >= 1",
+            name="device_limit_at_least_one",
+        ),
         Index(
             "uq_pricing_rules_site_id_active",
             "site_id",
             unique=True,
             postgresql_where=text("status = 'ACTIVE'"),
         ),
-        Index("ix_pricing_rules_site_id_status", "site_id", "status"),
+        Index(
+            "ix_pricing_rules_site_id_status",
+            "site_id",
+            "status",
+        ),
     )
 
     site_id: Mapped[uuid.UUID] = mapped_column(
@@ -75,8 +100,58 @@ class PricingRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("sites.id", ondelete="RESTRICT"),
         nullable=False,
     )
+
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, server_default="INACTIVE"
+        String(16),
+        nullable=False,
+        server_default="INACTIVE",
     )
 
-    # Allowed range of custome
+    min_amount: Mapped[float] = mapped_column(
+        MONEY,
+        nullable=False,
+    )
+
+    max_amount: Mapped[float] = mapped_column(
+        MONEY,
+        nullable=False,
+    )
+
+    duration_policy: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        server_default="PROPORTIONAL",
+    )
+
+    price_per_hour: Mapped[float] = mapped_column(
+        MONEY,
+        nullable=False,
+    )
+
+    rounding_policy: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default="DOWN",
+    )
+
+    rounding_step_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+    )
+
+    min_duration_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    max_duration_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    device_limit: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+    )
