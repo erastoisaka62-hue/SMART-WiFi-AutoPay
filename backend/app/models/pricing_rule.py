@@ -1,23 +1,26 @@
+
 """Table: pricing_rules.
 
-Administrator-controlled rules for custom customer-entered amounts.
+Administrator-controlled rules for customer-entered custom amounts.
 
-The customer only proposes an AMOUNT. The backend alone calculates the
-resulting duration from the active rule, so a customer can never choose
-their own duration by changing values in the browser.
+The customer proposes an amount only. The backend calculates the
+duration using the active pricing rule.
 
-Calculation policy (PROPORTIONAL):
-    duration = amount / price_per_hour * 60 minutes
-    then rounded using rounding_policy to a multiple of
-    rounding_step_minutes, and accepted only if it is between
-    min_duration_minutes and max_duration_minutes.
+PROPORTIONAL calculation:
+    raw_duration = amount / price_per_hour * 60
 
-Every purchase must keep a snapshot of the rule that was applied;
-editing a rule later never changes past purchases. Rules are
-deactivated, not deleted.
+The result is rounded according to rounding_policy and
+rounding_step_minutes, then checked against the minimum and
+maximum allowed duration.
+
+Every purchase must store a snapshot of the applied pricing rule.
+Editing a rule later must never change an existing purchase.
+
+Rules are deactivated, not deleted.
 """
 
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import (
     CheckConstraint,
@@ -82,6 +85,7 @@ class PricingRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "device_limit >= 1",
             name="device_limit_at_least_one",
         ),
+        # One active pricing rule per site.
         Index(
             "uq_pricing_rules_site_id_active",
             "site_id",
@@ -107,12 +111,12 @@ class PricingRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default="INACTIVE",
     )
 
-    min_amount: Mapped[float] = mapped_column(
+    min_amount: Mapped[Decimal] = mapped_column(
         MONEY,
         nullable=False,
     )
 
-    max_amount: Mapped[float] = mapped_column(
+    max_amount: Mapped[Decimal] = mapped_column(
         MONEY,
         nullable=False,
     )
@@ -123,7 +127,7 @@ class PricingRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default="PROPORTIONAL",
     )
 
-    price_per_hour: Mapped[float] = mapped_column(
+    price_per_hour: Mapped[Decimal] = mapped_column(
         MONEY,
         nullable=False,
     )
@@ -154,4 +158,5 @@ class PricingRule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Integer,
         nullable=False,
         server_default="1",
-    )
+)
+    
