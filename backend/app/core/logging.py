@@ -1,64 +1,87 @@
-"""Minimal application logging.
+"""Central application configuration.
 
-- Writes to standard output (the process manager or terminal collects it).
-- Uses UTC timestamps in ISO 8601 style.
-- Redacts values that follow sensitive keys (password, token, secret,
-  api key, authorization) so they do not reach the logs by accident.
+All settings are read from environment variables (or a local ".env"
+file) and validated once at startup. Invalid values stop the backend
+with a clear error instead of being silently accepted.
 
-This is a safety net, not a licence to log secrets: code must still
-avoid passing credentials to the logger in the first place.
+Secrets must never be given real defaults here or committed to Git.
+The database password is held as a SecretStr so it is masked in
+repr() output and never printed by accident.
 """
 
-import logging
-import re
-import sys
-import time
+from functools import lru_cache
+from typing import Literal
 
-_HANDLER_NAME = "autopay-console"
-_REDACTED = "***REDACTED***"
-
-_SENSITIVE_PATTERN = re.compile(
-    r"(?i)\b(password|passwd|secret|token|api[_-]?key|authorization)\b"
-    r"(\s*[=:]\s*)((?:bearer|basic)\s+)?(\S+)"
-)
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _redact(match: re.Match) -> str:
-    return f"{match.group(1)}{match.group(2)}{_REDACTED}"
+class Settings(BaseSettings):
+    """Validated settings for SMART Wi-Fi AutoPay."""
 
-
-class RedactSecretsFilter(logging.Filter):
-    """Mask values that follow sensitive keys in log messages."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        redacted = _SENSITIVE_PATTERN.sub(_redact, message)
-        if redacted != message:
-            record.msg = redacted
-            record.args = None
-        return True
-
-
-def configure_logging(level: str = "INFO") -> None:
-    """Configure root logging once; safe to call repeatedly."""
-    root = logging.getLogger()
-
-    # Remove only the handler installed by this function, so repeated
-    # calls (tests, reloads) never produce duplicate log lines.
-    for handler in list(root.handlers):
-        if handler.get_name() == _HANDLER_NAME:
-            root.removeHandler(handler)
-
-    formatter = logging.Formatter(
-        fmt="%(asctime)sZ | %(levelname)-8s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
+    # ".env" is resolved relative to the directory the backend is
+    # started from (documented: start the backend from "backend/").
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
-    formatter.converter = time.gmtime  # timestamps in UTC
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.set_name(_HANDLER_NAME)
-    handler.setFormatter(formatter)
-    handler.addFilter(RedactSecretsFilter())
+    app_name: str = Field(default="SMART Wi-Fi AutoPay", min_length=1)
+    app_version: str = Field(default="0.1.0", min_length=1)
+    app_env: Literal["development", "testing", "production"] = "development"
 
-    root.addHandler(handler)
-    root.setLevel(level)
+    # 127.0.0.1 keeps the backend reachable from this machine only.
+    server_host: str = Field(default="127.0.0.1", min_length=1)
+    server_port: int = Field(default=8000, ge=1, le=65535)
+
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    # PostgreSQL connection. The password has NO default: when it is
+    # missing, the database layer reports a clear error and the rest of
+    # the backend (for example GET /health) keeps working.
+    db_host: str = Field(default="127.0.0.1", min_length=1)
+    db_port: int = Field(default=5432, ge=1, le=65535)
+    db_name: str = Field(default="smart_wifi_autopay", min_length=1)
+    db_user: str = Field(default="autopay_app", min_length=1)
+    db_password: SecretStr | None = None
+
+    @field_validator(
+        "app_name",
+        "app_version",
+        "server_host",
+        "db_host",
+        "db_name",
+        "db_user",
+        mode="before",
+    )
+    @classmethod
+    def _strip_text(cls, value: object) -> object:
+        """Trim whitespace so blank-looking values are rejected."""
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalize_env(cls, value: object) -> object:
+        """Accept 'Production', ' production ' etc."""
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: object) -> object:
+        """Accept 'info', 'Info' etc."""
+        return value.strip().upper() if isinstance(value, str) else value
+
+    @field_validator("db_password", mode="before")
+    @classmethod
+    def _empty_password_is_missing(cls, value: object) -> object:
+        """Treat an empty DB_PASSWORD as 'not set' (never trim real passwords)."""
+        if isinstance(value, str) and value == "":
+            return None
+        return value
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the single validated Settings instance (loaded once)."""
+    return Settings()
